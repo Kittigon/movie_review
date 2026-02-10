@@ -9,6 +9,9 @@ const { preprocess } = require("../services/preprocess.service");
 router.get("/api/analyze", async (req, res) => {
     try {
         const { movieId } = req.query;
+        if (!process.env.TMDB_API_KEY) {
+            return res.status(500).json({ error: "Missing TMDB_API_KEY" });
+        }
         if (!movieId) {
             return res.status(400).json({ error: "missing movieId" });
         }
@@ -105,6 +108,9 @@ router.get("/api/analyze", async (req, res) => {
     } catch (err) {
         console.error("ANALYZE ERROR ");
         console.error(err);
+        if (err.code === "ECONNREFUSED") {
+            return res.status(502).json({ error: "Sentiment service unavailable" });
+        }
         res.status(500).json({
             error: err.message || "analyze failed"
         });

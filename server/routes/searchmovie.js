@@ -6,6 +6,10 @@ router.get("/search", async (req, res) => {
     try {
         const { q, page = 1 } = req.query;
 
+        if (!process.env.TMDB_API_KEY) {
+            return res.status(500).json({ error: "Missing TMDB_API_KEY" });
+        }
+
         if (!q) {
             return res.status(400).json({ error: "missing query" });
         }

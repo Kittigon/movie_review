@@ -30,6 +30,9 @@ async function fetchTmdbReviews(movieId) {
 router.get("/analyze/:movieId", async (req, res) => {
     try {
         const { movieId } = req.params
+        if (!process.env.TMDB_API_KEY) {
+            return res.status(500).json({ error: "Missing TMDB_API_KEY" })
+        }
 
         // 1️⃣ ดึงรีวิวจาก TMDB
         const reviews = await fetchTmdbReviews(movieId)
@@ -90,6 +93,8 @@ router.get("/analyze/:movieId", async (req, res) => {
 
         // 4️⃣ สรุป verdict
         
+        let summary = "mixed"
+
         if (
             stats.positive > stats.negative &&
             stats.positive > stats.neutral
@@ -129,6 +134,9 @@ router.get("/analyze/:movieId", async (req, res) => {
         console.error("ANALYZE ERROR:", err.message)
         if (err.response) {
             console.error("Response data:", err.response.data)
+        }
+        if (err.code == "ECONNREFUSED") {
+            return res.status(502).json({ error: "Sentiment service unavailable" })
         }
         res.status(500).json({ error: "Analyze failed" })
     }
