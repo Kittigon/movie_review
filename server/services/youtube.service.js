@@ -4,6 +4,9 @@ const BASE_URL = "https://www.googleapis.com/youtube/v3"
 const API_KEY = process.env.YOUTUBE_API_KEY
 
 async function fetchYoutubeComments(videoId, limit = 200) {
+    if (!API_KEY) {
+        throw new Error("Missing YOUTUBE_API_KEY")
+    }
     let comments = []
     let nextPageToken = null
 
@@ -41,4 +44,36 @@ async function fetchYoutubeComments(videoId, limit = 200) {
 
 module.exports = {
     fetchYoutubeComments,
+    checkYoutubeApi: async function checkYoutubeApi(videoId) {
+        if (!API_KEY) {
+            throw new Error("Missing YOUTUBE_API_KEY")
+        }
+        if (!videoId) {
+            return { ok: true, note: "No videoId provided; API key present" }
+        }
+
+        try {
+            const res = await axios.get(`${BASE_URL}/videos`, {
+                params: {
+                    part: "snippet",
+                    id: videoId,
+                    key: API_KEY,
+                },
+                timeout: 10_000,
+            })
+
+            const found = Array.isArray(res.data?.items) && res.data.items.length > 0
+            return {
+                ok: true,
+                found,
+                status: res.status,
+            }
+        } catch (err) {
+            return {
+                ok: false,
+                status: err.response?.status,
+                error: err.response?.data || err.message,
+            }
+        }
+    },
 }
