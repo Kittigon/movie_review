@@ -1,4 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { FaStar } from "react-icons/fa6";
+import Navbar from "./components/Navbar";
+import MovieCard from "./components/MovieCard";
+import MovieDetailModal from "./components/MovieDetailModal";
 
 function App() {
   const [query, setQuery] = useState("");
@@ -6,113 +10,154 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const searchMovie = async () => {
-    if (!query.trim()) return;
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
 
+  const [selectedMovie, setSelectedMovie] = useState(null);
+
+  const apiBase =
+    import.meta.env.VITE_API_BASE?.replace(/\/+$/, "") ||
+    "http://localhost:8080";
+
+  const fetchMovies = async (searchTerm, pageNum = 1) => {
+    if (!searchTerm) return;
     setLoading(true);
     setError("");
-    setMovies([]);
 
     try {
       const res = await fetch(
-        `http://localhost:8080/search?q=${encodeURIComponent(query)}`
+        `${apiBase}/search?q=${encodeURIComponent(searchTerm)}&page=${pageNum}`
       );
+      if (!res.ok) throw new Error("Server Error");
+
       const data = await res.json();
       setMovies(data.results || []);
+      setTotalPages(data.totalPages || 0);
     } catch (err) {
-      setError("เกิดข้อผิดพลาดในการค้นหา");
+      // แก้ไข 1: ข้อความแจ้งเตือนเมื่อเกิด Error
+      setError("ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง");
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setPage(newPage);
+      fetchMovies(query || "Marvel", newPage);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  useEffect(() => {
+    fetchMovies("Marvel", 1);
+  }, []);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (query.trim()) {
+        setPage(1);
+        fetchMovies(query, 1);
+      } else if (query === "") {
+        setPage(1);
+        fetchMovies("Marvel", 1);
+      }
+    }, 800);
+    return () => clearTimeout(delayDebounceFn);
+  }, [query]);
+
   return (
-    <div style={styles.container}>
-      <h1>🎬 Movie Search</h1>
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
+      <Navbar onSearch={setQuery} searchValue={query} />
 
-      <div style={styles.searchBox}>
-        <input
-          type="text"
-          placeholder="พิมพ์ชื่อหนัง..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && searchMovie()}
-          style={styles.input}
-        />
-        <button onClick={searchMovie} style={styles.button}>
-          ค้นหา
-        </button>
-      </div>
-
-      {loading && <p>กำลังค้นหา...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      <div style={styles.grid}>
-        {movies.map((m) => (
-          <div key={m.id} style={styles.card}>
-            {m.poster ? (
-              <img src={m.poster} alt={m.title} style={styles.poster} />
-            ) : (
-              <div style={styles.noPoster}>No Image</div>
-            )}
-            <h3>{m.title}</h3>
-            <small>{m.release_date}</small>
-            <p style={styles.overview}>{m.overview}</p>
+      <main className="w-full px-6 py-8">
+        <div className="mb-6 border-b border-gray-200 pb-4 flex justify-between items-end">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              {query ? (
+                <>
+                  {/* แก้ไข 2: ข้อความหัวข้อเมื่อมีการค้นหา */}
+                  <span>ผลการค้นหาสำหรับ:</span>
+                  <span className="text-indigo-600">"{query}"</span>
+                </>
+              ) : (
+                <>
+                  <FaStar className="text-yellow-500" aria-hidden="true" />
+                  {/* แก้ไข 3: ข้อความหัวข้อหน้าแรก/แนะนำ */}
+                  <span>ภาพยนตร์แนะนำ</span>
+                </>
+              )}
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {/* แก้ไข 4: ข้อความแสดงเลขหน้า */}
+              หน้า {page} จาก {totalPages}
+            </p>
           </div>
-        ))}
-      </div>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+          </div>
+        ) : error ? (
+          <div className="bg-red-50 text-red-600 p-4 rounded-lg text-center">
+            {error}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6 gap-6 mb-8">
+              {movies.length > 0 ? (
+                movies.map((movie) => (
+                  <MovieCard
+                    key={movie.id}
+                    movie={movie}
+                    onClick={(m) => setSelectedMovie(m)}
+                  />
+                ))
+              ) : (
+                <div className="col-span-full text-center py-20 text-gray-400">
+                  {/* แก้ไข 5: ข้อความเมื่อไม่พบข้อมูล */}
+                  ไม่พบข้อมูลภาพยนตร์
+                </div>
+              )}
+            </div>
+
+            {movies.length > 0 && totalPages > 1 && (
+              <div className="flex justify-center items-center gap-4 py-6 border-t border-gray-200">
+                <button
+                  onClick={() => handlePageChange(page - 1)}
+                  disabled={page === 1}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
+                >
+                  {/* แก้ไข 6: ปุ่มย้อนกลับ */}
+                  ก่อนหน้า
+                </button>
+                <span className="text-sm font-medium text-gray-700">
+                  {page} / {totalPages}
+                </span>
+                <button
+                  onClick={() => handlePageChange(page + 1)}
+                  disabled={page === totalPages}
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
+                >
+                  {/* แก้ไข 7: ปุ่มถัดไป */}
+                  ถัดไป
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {selectedMovie && (
+        <MovieDetailModal
+          movie={selectedMovie}
+          onClose={() => setSelectedMovie(null)}
+        />
+      )}
     </div>
   );
 }
-
-const styles = {
-  container: {
-    fontFamily: "sans-serif",
-    padding: 20,
-    maxWidth: 1200,
-    margin: "auto",
-  },
-  searchBox: {
-    display: "flex",
-    gap: 10,
-    marginBottom: 20,
-  },
-  input: {
-    flex: 1,
-    padding: 10,
-    fontSize: 16,
-  },
-  button: {
-    padding: "10px 20px",
-    fontSize: 16,
-    cursor: "pointer",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-    gap: 16,
-  },
-  card: {
-    border: "1px solid #ddd",
-    borderRadius: 8,
-    padding: 10,
-  },
-  poster: {
-    width: "100%",
-    borderRadius: 6,
-  },
-  noPoster: {
-    height: 300,
-    background: "#eee",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  overview: {
-    fontSize: 14,
-    maxHeight: 80,
-    overflow: "hidden",
-  },
-};
 
 export default App;
