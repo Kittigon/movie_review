@@ -65,8 +65,31 @@ router.get("/api/analyze", async (req, res) => {
             neutralPercent: +(neutral / total * 100).toFixed(2),
         };
 
-        //  สรุป verdict
         let summary = "mixed";
+
+        if (
+            stats.positive > stats.negative &&
+            stats.positive > stats.neutral
+        ) {
+            summary = "positive";
+        }
+
+        if (
+            stats.negative > stats.positive &&
+            stats.negative > stats.neutral
+        ) {
+            summary = "negative";
+        }
+
+        // กรณี neutral เด่น
+        if (
+            stats.neutral > stats.positive &&
+            stats.neutral > stats.negative
+        ) {
+            summary = "neutral";
+        }
+
+        // override กรณีชนะขาด
         if (stats.positivePercent >= 60) summary = "positive";
         else if (stats.negativePercent >= 60) summary = "negative";
 
@@ -74,9 +97,9 @@ router.get("/api/analyze", async (req, res) => {
         res.json({
             imdbId,
             totalReviews: total,
-            summary,        
-            stats,          
-            reviews: cleanReviews.slice(0, 5) 
+            summary,
+            stats,
+            reviews: cleanReviews.slice(0, 5)
         });
 
     } catch (err) {

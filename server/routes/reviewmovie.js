@@ -89,9 +89,32 @@ router.get("/analyze/:movieId", async (req, res) => {
         }
 
         // 4️⃣ สรุป verdict
-        let summary = "mixed"
-        if (stats.positivePercent >= 60) summary = "positive"
-        else if (stats.negativePercent >= 60) summary = "negative"
+        
+        if (
+            stats.positive > stats.negative &&
+            stats.positive > stats.neutral
+        ) {
+            summary = "positive";
+        }
+
+        if (
+            stats.negative > stats.positive &&
+            stats.negative > stats.neutral
+        ) {
+            summary = "negative";
+        }
+
+        // กรณี neutral เด่น
+        if (
+            stats.neutral > stats.positive &&
+            stats.neutral > stats.negative
+        ) {
+            summary = "neutral";
+        }
+
+        // override กรณีชนะขาด
+        if (stats.positivePercent >= 60) summary = "positive";
+        else if (stats.negativePercent >= 60) summary = "negative";
 
         // 5️⃣ response
         res.json({
