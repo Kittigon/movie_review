@@ -14,7 +14,7 @@ app.use(morgan("dev"));
 // loop router
 const routesDir = path.join(__dirname, "routes");
 readdirSync(routesDir).map((r) =>
-    app.use("/", require(path.join(routesDir, r)))
+    app.use("/api", require(path.join(routesDir, r)))
 );
 
 if (require.main === module) {
