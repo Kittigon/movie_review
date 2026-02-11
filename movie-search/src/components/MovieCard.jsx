@@ -80,4 +80,9 @@ const MovieCard = ({ movie, onClick, genreMap = {} }) => {
     );
 };
 
+
+
+
+// fffff
+
 export default memo(MovieCard);
