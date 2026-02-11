@@ -1,6 +1,8 @@
 const express = require("express")
 const router = express.Router()
 const axios = require("axios")
+const { searchYoutubeVideos, fetchYoutubeComments } = require("../services/youtube.service")
+const SENTIMENT_URL = process.env.SENTIMENT_API_URL || "https://mini-project-afyj.onrender.com/predict_batch"
 
 async function fetchTmdbReviews(movieId) {
     let page = 1
@@ -27,6 +29,24 @@ async function fetchTmdbReviews(movieId) {
     return reviews.filter(r => r.content && r.content.length > 20)
 }
 
+async function fetchTmdbTitle(movieId) {
+    const { data } = await axios.get(
+        `https://api.themoviedb.org/3/movie/${movieId}`,
+        { params: { api_key: process.env.TMDB_API_KEY, language: "en-US" } }
+    )
+    return data?.title || data?.original_title || ""
+}
+
+function isLikelyEnglish(text) {
+    if (!text) return false
+    const letters = (text.match(/[A-Za-z]/g) || []).length
+    const nonLatin = (text.match(/[^\x00-\x7F]/g) || []).length
+    const total = text.length || 1
+    const letterRatio = letters / total
+    const nonLatinRatio = nonLatin / total
+    return letterRatio >= 0.3 && nonLatinRatio <= 0.2
+}
+
 router.get("/analyze/:movieId", async (req, res) => {
     try {
         const { movieId } = req.params
@@ -34,12 +54,33 @@ router.get("/analyze/:movieId", async (req, res) => {
             return res.status(500).json({ error: "Missing TMDB_API_KEY" })
         }
 
-        // 1️⃣ ดึงรีวิวจาก TMDB
-        const reviews = await fetchTmdbReviews(movieId)
-        const source = "TMDB"
+        // 1) fetch TMDB data
+        const [reviews, title] = await Promise.all([
+            fetchTmdbReviews(movieId),
+            fetchTmdbTitle(movieId),
+        ])
 
-        // ไม่มีรีวิวเลย
-        if (reviews.length === 0) {
+        let youtubeComments = []
+        let youtubeVideoId = null
+        let youtubeQuery = null
+
+        if (process.env.YOUTUBE_API_KEY && title) {
+            try {
+                youtubeQuery = `${title} official trailer`
+                const results = await searchYoutubeVideos(youtubeQuery, 1)
+                const first = results[0]
+                if (first?.videoId) {
+                    youtubeVideoId = first.videoId
+                    youtubeComments = await fetchYoutubeComments(first.videoId, 200)
+                }
+            } catch (err) {
+                console.error("YOUTUBE ERROR:", err.message)
+            }
+        }
+
+        const source = youtubeComments.length > 0 ? "TMDB+YouTube" : "TMDB"
+
+        if (reviews.length === 0 && youtubeComments.length === 0) {
             return res.json({
                 source,
                 totalReviews: 0,
@@ -49,23 +90,47 @@ router.get("/analyze/:movieId", async (req, res) => {
             })
         }
 
-        // 2️⃣ ส่งเข้า sentiment model
+        const tmdbItems = reviews.map(r => ({
+            source: "TMDB",
+            author: r.author,
+            content: r.content,
+        })).filter(r => isLikelyEnglish(r.content))
+
+        const youtubeItems = youtubeComments.map(c => ({
+            source: "YouTube",
+            author: c.author,
+            content: c.text,
+        })).filter(r => isLikelyEnglish(r.content))
+
+        const allItems = [...tmdbItems, ...youtubeItems]
+
+        if (allItems.length === 0) {
+            return res.json({
+                source,
+                totalReviews: 0,
+                summary: "no data",
+                stats: {},
+                reviews: []
+            })
+        }
+
+        // 2) sentiment model
         const sentimentRes = await axios.post(
-            "http://127.0.0.1:8000/predict_batch",
+            SENTIMENT_URL,
             {
-                texts: reviews.map(r => r.content)
+                texts: allItems.map(r => r.content)
             },
             { timeout: 60_000 }
         )
 
         const sentiments = sentimentRes.data
 
-        // 3️⃣ merge + นับผล
+        // 3) merge + count
         let positive = 0
         let negative = 0
         let neutral = 0
 
-        const merged = reviews.map((r, i) => {
+        const merged = allItems.map((r, i) => {
             const label = sentiments[i].label.toLowerCase()
 
             if (label === "positive") positive++
@@ -73,12 +138,16 @@ router.get("/analyze/:movieId", async (req, res) => {
             else neutral++
 
             return {
+                source: r.source,
                 author: r.author,
                 content: r.content,
                 sentiment: label,
                 confidence: sentiments[i].max_prob
             }
         })
+
+        const tmdbLabeled = merged.filter(r => r.source === "TMDB")
+        const youtubeLabeled = merged.filter(r => r.source === "YouTube")
 
         const total = merged.length
 
@@ -91,8 +160,7 @@ router.get("/analyze/:movieId", async (req, res) => {
             neutralPercent: +(neutral / total * 100).toFixed(2)
         }
 
-        // 4️⃣ สรุป verdict
-        
+        // 4) summary
         let summary = "mixed"
 
         if (
@@ -109,7 +177,6 @@ router.get("/analyze/:movieId", async (req, res) => {
             summary = "negative";
         }
 
-        // กรณี neutral เด่น
         if (
             stats.neutral > stats.positive &&
             stats.neutral > stats.negative
@@ -117,17 +184,24 @@ router.get("/analyze/:movieId", async (req, res) => {
             summary = "neutral";
         }
 
-        // override กรณีชนะขาด
         if (stats.positivePercent >= 60) summary = "positive";
         else if (stats.negativePercent >= 60) summary = "negative";
 
-        // 5️⃣ response
+        // 5) response
         res.json({
             source,
             totalReviews: total,
             summary,
             stats,
-            reviews: merged
+            sources: {
+                tmdbCount: tmdbItems.length,
+                youtubeCount: youtubeItems.length,
+                youtubeVideoId,
+                youtubeQuery,
+            },
+            reviews: merged,
+            tmdbReviews: tmdbLabeled,
+            youtubeComments: youtubeLabeled
         })
 
     } catch (err) {
@@ -135,9 +209,17 @@ router.get("/analyze/:movieId", async (req, res) => {
         if (err.response) {
             console.error("Response data:", err.response.data)
         }
-        if (err.code == "ECONNREFUSED") {
+        const upstreamStatus = err.response?.status
+        const isSentimentFailure =
+            err.code === "ECONNREFUSED" ||
+            err.code === "ECONNABORTED" ||
+            [502, 503, 504].includes(upstreamStatus) ||
+            String(err.config?.url || "").includes("predict_batch")
+
+        if (isSentimentFailure) {
             return res.status(502).json({ error: "Sentiment service unavailable" })
         }
+
         res.status(500).json({ error: "Analyze failed" })
     }
 })
